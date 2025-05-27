@@ -2,6 +2,7 @@
 
 use libafl_qemu::*;
 use libafl::prelude::*;
+use libafl_bolts::Named;
 
 use log;
 use serde::{Deserialize, Serialize};

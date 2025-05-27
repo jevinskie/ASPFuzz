@@ -3,6 +3,7 @@
 
 use libafl_qemu::*;
 use libafl::prelude::*;
+use libafl_bolts::Named;
 
 use log;
 use serde::{Deserialize, Serialize};
@@ -29,7 +30,7 @@ pub struct CustomMetadata {
     pub cpsr: String,
 }
 
-impl_serdeany!(CustomMetadata);
+libafl_bolts::impl_serdeany!(CustomMetadata);
 
 impl CustomMetadata {
     /// Creates a new [`struct@CustomMetadata`]

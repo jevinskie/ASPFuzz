@@ -1,6 +1,8 @@
 [submodule "LibAFL"]
 	path = LibAFL
-	url = https://github.com/TeumessianFox/LibAFL.git
+	url = https://github.com/jevinskie/LibAFL
+	branch = jev/aspfuzz
 [submodule "qemu-libafl-asp"]
 	path = qemu-libafl-asp
-	url = https://github.com/TeumessianFox/qemu-libafl-asp.git
+	url = https://github.com/jevinskie/qemu
+	branch = jev/aspfuzz

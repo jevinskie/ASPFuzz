@@ -7,8 +7,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libafl = { path = "../../LibAFL/libafl/", default-features = false, features = ["prelude"] }
+libafl = { path = "../../LibAFL/libafl/", default-features = false, features = ["prelude", "introspection"] }
 libafl_qemu = { path = "../../LibAFL/libafl_qemu/", features = ["arm", "systemmode"], default-features = false }
+libafl_bolts = { path = "../../LibAFL/libafl_bolts/" }
 serde = { version = "1.0", default-features = false, features = ["alloc"] } # serialization lib
 yaml-rust = "0.4"
 log = "0.4"
