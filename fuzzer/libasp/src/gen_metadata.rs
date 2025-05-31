@@ -7,6 +7,7 @@ use libafl_bolts::Named;
 
 use log;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
 /// A custom testcase metadata
 #[derive(Debug, Serialize, Deserialize)]
@@ -98,7 +99,7 @@ where
 
 impl Named for CustomMetadataFeedback {
     #[inline]
-    fn name(&self) -> &str {
+    fn name(&self) -> &Cow<'static, str> {
         "CustomMetadataFeedback"
     }
 }

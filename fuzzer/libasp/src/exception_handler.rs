@@ -7,6 +7,7 @@ use libafl_bolts::Named;
 use log;
 use serde::{Deserialize, Serialize};
 use core::fmt::{Debug};
+use std::borrow::Cow;
 
 #[derive(Copy, Clone)]
 pub enum ExceptionType {
@@ -158,7 +159,7 @@ where
 
 impl Named for ExceptionFeedback {
     #[inline]
-    fn name(&self) -> &str {
+    fn name(&self) -> &Cow<'static, str> {
         "ExceptionFeedback"
     }
 }
