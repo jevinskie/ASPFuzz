@@ -1,5 +1,4 @@
 use libafl::corpus::{OnDiskCorpus};
-use libafl::prelude::ondisk::OnDiskMetadataFormat;
 use libafl::prelude::*;
 use libafl_qemu::qemu::Qemu;
 use libafl_qemu::qemu::CPU;
@@ -456,19 +455,19 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
         // Configure DrCov helper
         let mut log_drcov_path = log_dir.clone();
         log_drcov_path.push("drcov.log");
-        let mut rangemap = RangeMap::<usize, (u16, String)>::new();
+        let mut rangemap = RangeMap::<u64, (u16, String)>::new();
         rangemap.insert(
-            (0x0 as usize)..(0xffff_9000 as usize),
+            (0x0 as u64)..(0xffff_9000 as u64),
             (0, "on-chip-ryzen-zen.bl".to_string()),
         );
 
         // Configure QEMU hook helper
-        let mut hooks = QemuHooks::get(tuple_list!(
+        let mut hooks = QemuHooks::get().unwrap().new(tuple_list!(
                 StdEdgeCoverageModuleBuilder::default(),
                 DrCovModule::new(
                     StdAddressFilter::default(),
-                    rangemap,
                     log_drcov_path,
+                    Some(rangemap),
                     false,
                 )
         )).unwrap();
