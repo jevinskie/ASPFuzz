@@ -109,7 +109,7 @@ impl ResetState {
 
         // Saving SRAM
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
-        cpu.read_mem(SRAM_START, &mut self.sram);
+        cpu.read_mem(SRAM_START, &mut self.sram).unwrap();
 
         // Saving ASP timer state
         unsafe {
@@ -143,7 +143,7 @@ impl ResetState {
         // Resetting SRAM (predefined section)
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
         let sram_slice = &self.sram[((self.sram_size-LAZY_SRAM_SIZE) as usize)..(self.sram_size as usize)];
-        cpu.write_mem(self.sram_size-LAZY_SRAM_SIZE, &sram_slice);
+        cpu.write_mem(self.sram_size-LAZY_SRAM_SIZE, &sram_slice).unwrap();
     }
 
     /* Rust snapshot reset */
@@ -155,7 +155,7 @@ impl ResetState {
 
         // Resetting SRAM
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
-        cpu.write_mem(SRAM_START, &self.sram);
+        cpu.write_mem(SRAM_START, &self.sram).unwrap();
 
         // Resetting timer
         unsafe {
@@ -210,7 +210,7 @@ impl ResetState {
 
         // Zero SRAM
         let zero_sram = vec![0; self.sram_size.try_into().unwrap()];
-        cpu.write_mem(SRAM_START, &zero_sram);
+        cpu.write_mem(SRAM_START, &zero_sram).unwrap();
 
         // Zero timer
         unsafe {
@@ -231,8 +231,8 @@ impl ResetState {
         // Run until fuzzing start address
         qemu.set_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
         unsafe {
-        qemu.run();
-        }
+        qemu.run()
+        }.unwrap();
         qemu.remove_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
         let pc = cpu.read_reg(Regs::Pc).unwrap();
@@ -246,7 +246,7 @@ impl ResetState {
 
     pub fn current_sram_to_file(&mut self, qemu: &Qemu) {
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
-        cpu.write_mem(SRAM_START, &self.sram);
+        cpu.write_mem(SRAM_START, &self.sram).unwrap();
         let mut file = File::create("sram.dump").unwrap();
         file.write(&self.sram).unwrap();
     }

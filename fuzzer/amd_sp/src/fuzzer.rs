@@ -1,7 +1,10 @@
 use libafl::corpus::ondisk::OnDiskMetadataFormat;
 use libafl::prelude::*;
+use libafl_qemu::qemu::Qemu;
+use libafl_qemu::modules::EmulatorModuleTuple;
 use libafl_qemu::*;
-use libafl_qemu::drcov::QemuDrCovHelper;
+use libafl_bolts::{current_nanos, tuple_list, AsSlice};
+use libafl_bolts::prelude::{StdRand, dup2};
 
 use libasp::*;
 
@@ -35,7 +38,7 @@ use std::os::unix::io::FromRawFd;
 
 const ON_CHIP_ADDR: GuestAddr = 0xffff_0000;
 
-static mut EMULATOR: u64 = 0;
+static mut QEMU: u64 = 0;
 static mut COUNTER_EDGE_HOOKS: usize = 0;
 static mut COUNTER_WRITE_HOOKS: usize = 0;
 static mut COUNTER_SNAPSHOT: usize = 0;
@@ -45,14 +48,13 @@ static mut RUN_DIR_NAME: Option<String> = None;
 #[cfg(feature = "multicore")]
 static mut NUM_CORES: Option<u32> = None;
 
-fn gen_block_hook<QT, S>(
-    _hooks: &mut QemuHooks<QT, S>,
+fn gen_block_hook<ET, S, I>(
+    _hooks: &mut QemuHooks,
     _id: Option<&mut S>,
     src: GuestAddr,
 ) -> Option<u64>
 where
-    S: UsesInput,
-    QT: QemuHelperTuple<S>,
+    ET: EmulatorModuleTuple<I, S>,
 {
     let conf = borrow_global_conf().unwrap();
     for no_exec in conf.crashes_mmap_no_exec.iter() {
@@ -61,8 +63,8 @@ where
             log::debug!("> src: {:#x}", src);
             unsafe { COUNTER_EDGE_HOOKS += 1 };
             log::debug!("> id: {:#x}", unsafe { COUNTER_EDGE_HOOKS });
-            let emu = unsafe { (EMULATOR as *const Emulator).as_ref().unwrap() };
-            emu.current_cpu().unwrap().trigger_breakpoint();
+            let qemu = unsafe { (QEMU as *const Qemu).as_ref().unwrap() };
+            qemu.current_cpu().unwrap().trigger_breakpoint();
             return Some(unsafe { COUNTER_EDGE_HOOKS } as u64);
         }
     }
@@ -80,23 +82,23 @@ where
 }
 
 extern "C" fn exec_block_hook(id: u64, data: u64) {
-    let emu = unsafe { (EMULATOR as *const Emulator).as_ref().unwrap() };
+    let qemu = unsafe { (QEMU as *const Qemu).as_ref().unwrap() };
     if unsafe { FLASH_READ_HOOK_ID } == id as usize {
         let conf = borrow_global_conf().unwrap();
-        let cpu = emu.current_cpu().unwrap();
-        let pc: u64 = cpu.read_reg(Regs::Pc).unwrap();
+        let cpu = qemu.current_cpu().unwrap();
+        let pc = cpu.read_reg(Regs::Pc).unwrap();
         log::debug!("Flash read fn id was hit");
         if pc as GuestAddr == conf.crashes_mmap_flash_read_fn {
-            let cpy_src: GuestAddr = cpu.read_reg::<libafl_qemu::Regs, u64>(Regs::R0).unwrap() as GuestAddr;
-            let cpy_dest_start: GuestAddr = cpu.read_reg::<libafl_qemu::Regs, u64>(Regs::R1).unwrap() as GuestAddr;
-            let cpy_len: GuestAddr = cpu.read_reg::<libafl_qemu::Regs, u64>(Regs::R2).unwrap() as GuestAddr;
+            let cpy_src: GuestAddr = cpu.read_reg::<libafl_qemu::Regs>(Regs::R0).unwrap() as GuestAddr;
+            let cpy_dest_start: GuestAddr = cpu.read_reg::<libafl_qemu::Regs>(Regs::R1).unwrap() as GuestAddr;
+            let cpy_len: GuestAddr = cpu.read_reg::<libafl_qemu::Regs>(Regs::R2).unwrap() as GuestAddr;
             let cpy_dest_end: GuestAddr = cpy_dest_start + cpy_len;
             log::debug!("Flash read fn from {:#010x} to {:#010x} for {:#x} bytes", cpy_src, cpy_dest_start, cpy_len);
             for area in &conf.crashes_mmap_no_write_flash_fn {
                 if (area.0 >= cpy_dest_start && area.0 < cpy_dest_end) ||
                     (area.1 >= cpy_dest_start && area.1 < cpy_dest_end) {
                     log::debug!("Flash read fn writes to [{:#010x}, {:#010x}]", area.0, area.1);
-                    let cpy_lr: GuestAddr = cpu.read_reg::<libafl_qemu::Regs, u64>(Regs::Lr).unwrap() as GuestAddr;
+                    let cpy_lr: GuestAddr = cpu.read_reg::<libafl_qemu::Regs>(Regs::Lr).unwrap() as GuestAddr;
                     log::debug!("Flash read fn called from {:#010x}", cpy_lr);
                     if !area.2.contains(&cpy_lr) {
                         log::info!("Flash read fn hook triggered!");
@@ -109,19 +111,18 @@ extern "C" fn exec_block_hook(id: u64, data: u64) {
         log::debug!("Execute block:");
         log::debug!("> id: {}", id);
         log::debug!("> data: {}", data);
-        emu.current_cpu().unwrap().trigger_breakpoint();
+        qemu.current_cpu().unwrap().trigger_breakpoint();
     }
 }
 
-fn gen_writes_hook<QT, S>(
-    _hooks: &mut QemuHooks<QT, S>,
+fn gen_writes_hook<ET, S, I>(
+    _hooks: &mut QemuHooks,
     _id: Option<&mut S>,
     src: GuestAddr,
     size: usize,
 ) -> Option<u64>
 where
-    S: UsesInput,
-    QT: QemuHelperTuple<S>,
+    ET: EmulatorModuleTuple<I, S>,
 {
     let conf = borrow_global_conf().unwrap();
     for no_write in conf.crashes_mmap_no_write_hooks.iter() {
@@ -148,8 +149,8 @@ extern "C" fn exec_writes_hook(id: u64, addr: GuestAddr, data: u64) {
             log::debug!("> id: {:#x}", id);
             log::debug!("> addr: {:#x}", addr);
             log::debug!("> data: {}", data);
-            let emu = unsafe { (EMULATOR as *const Emulator).as_ref().unwrap() };
-            emu.current_cpu().unwrap().trigger_breakpoint();
+            let qemu = unsafe { (QEMU as *const Qemu).as_ref().unwrap() };
+            qemu.current_cpu().unwrap().trigger_breakpoint();
         }
     }
 }
@@ -162,8 +163,8 @@ extern "C" fn exec_writes_hook_n(id: u64, addr: GuestAddr, size: usize, data: u6
             log::debug!("> addr: {:#x}", addr);
             log::debug!("> size: {}", size);
             log::debug!("> data: {}", data);
-            let emu = unsafe { (EMULATOR as *const Emulator).as_ref().unwrap() };
-            emu.current_cpu().unwrap().trigger_breakpoint();
+            let qemu = unsafe { (QEMU as *const Qemu).as_ref().unwrap() };
+            qemu.current_cpu().unwrap().trigger_breakpoint();
         }
     }
 }
@@ -224,7 +225,7 @@ fn print_input(input: &[u8]) {
 }
 
 extern "C" fn on_vcpu(mut cpu: CPU) {
-    let emu = cpu.emulator();
+    let qemu = cpu.emulator();
     let conf = borrow_global_conf().unwrap();
 
     // Create directory for this run
@@ -293,28 +294,28 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
 
     // Set fuzzing sinks
     for sink in &conf.harness_sinks {
-        emu.set_breakpoint(*sink);
+        qemu.set_breakpoint(*sink);
     }
 
     // Go to FUZZ_START
-    emu.set_breakpoint(conf.harness_start);
-    emu.start(&cpu);
-    emu.remove_breakpoint(conf.harness_start);
-    cpu = emu.current_cpu().unwrap(); // ctx switch safe
-    let pc: u64 = cpu.read_reg(Regs::Pc).unwrap();
+    qemu.set_breakpoint(conf.harness_start);
+    qemu.start(&cpu);
+    qemu.remove_breakpoint(conf.harness_start);
+    cpu = qemu.current_cpu().unwrap(); // ctx switch safe
+    let pc = cpu.read_reg(Regs::Pc).unwrap();
     log::debug!("#### First exit at {:#x} ####", pc);
 
     // Save emulator state
-    rs.save(&emu, &ResetLevel::RustSnapshot);
+    rs.save(&qemu, &ResetLevel::RustSnapshot);
     // Catching exceptions
-    eh.start(&emu);
+    eh.start(&qemu);
     // Setup tunnels cmps
     for cmp in &conf.tunnels_cmps {
-        add_tunnels_cmp((*cmp).0, &(*cmp).1, &emu);
+        add_tunnels_cmp((*cmp).0, &(*cmp).1, &qemu);
     }
     // Setup crash breakpoints
     for bp in &conf.crashes_breakpoints {
-        emu.set_breakpoint(*bp);
+        qemu.set_breakpoint(*bp);
     }
 
     // The closure that we want to fuzz
@@ -324,12 +325,12 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
         // Reset emulator state
         if unsafe { CRASH_SNAPSHOT } {
             unsafe { CRASH_SNAPSHOT = false; }
-            rs.load(&emu, &conf.snapshot_on_crash);
+            rs.load(&qemu, &conf.snapshot_on_crash);
         } else if unsafe { COUNTER_SNAPSHOT >= conf.snapshot_period } {
             unsafe { COUNTER_SNAPSHOT = 0; }
-            rs.load(&emu, &conf.snapshot_periodically);
+            rs.load(&qemu, &conf.snapshot_periodically);
         } else {
-            rs.load(&emu, &conf.snapshot_default);
+            rs.load(&qemu, &conf.snapshot_default);
         }
 
         #[cfg(feature = "debug")]
@@ -344,7 +345,7 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
         let mut buffer = vec![0; conf.input_total_size];
         buffer[..target_buf.len()].copy_from_slice(target_buf);
         let mut buffer = buffer.as_slice();
-        cpu = emu.current_cpu().unwrap(); // ctx switch safe
+        cpu = qemu.current_cpu().unwrap(); // ctx switch safe
         for mem in conf.input_mem.iter() {
             unsafe { write_flash_mem(mem.0, &buffer[..mem.1]); }
             buffer = &buffer[mem.1..];
@@ -357,9 +358,9 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
         }
 
         // Start the emulation
-        let mut pc: u64 = cpu.read_reg(Regs::Pc).unwrap();
+        let mut pc = cpu.read_reg(Regs::Pc).unwrap();
         log::debug!("Start at {:#x}", pc);
-        emu.start(&cpu);
+        qemu.start(&cpu);
 
         // After the emulator finished
         pc = cpu.read_reg(Regs::Pc).unwrap();
@@ -410,7 +411,7 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
                 feedback_or!(CrashFeedback::new(), ExceptionFeedback::new()),
                 objective_coverage_feedback
             ),
-            CustomMetadataFeedback::new( unsafe { EMULATOR } ) // always true, used to write metadata output whenever a test-case is a solution
+            CustomMetadataFeedback::new( unsafe { QEMU } ) // always true, used to write metadata output whenever a test-case is a solution
         );
 
         // create a State from scratch
@@ -452,15 +453,15 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
         );
 
         // Configure QEMU hook helper
-        let mut hooks = QemuHooks::new(&emu, tuple_list!(
-                QemuEdgeCoverageHelper::new(QemuInstrumentationFilter::None),
-                QemuDrCovHelper::new(
+        let mut hooks = QemuHooks::get(tuple_list!(
+                EdgeCoverageModuleBuilder::new(QemuInstrumentationFilter::None),
+                DrCovModuleBuilder::new(
                     QemuInstrumentationFilter::None,
                     rangemap,
                     log_drcov_path,
                     false,
                 )
-        ));
+        )).unwrap();
 
         // Block hooks and write hooks for crash detection
         hooks.blocks_raw(Some(gen_block_hook), Some(exec_block_hook));
@@ -500,7 +501,7 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
             });
 
         // Setup a mutational stage with a basic bytes mutator
-        let mutator = StdScheduledMutator::new(havoc_mutations());
+        let mutator = HavocScheduledMutator::new(havoc_mutations());
         let mut stages = tuple_list!(StdMutationalStage::new(mutator));
 
         log::info!("Starting fuzzing loop");
@@ -691,16 +692,14 @@ pub fn fuzz() {
     let qemu_args = parse_args();
 
     // Setup QEMU
-    let emu = Emulator::new(&qemu_args, &env);
+    let qemu = Qemu::new(&qemu_args, &env);
     unsafe {
-        EMULATOR = &emu as *const _ as u64;
+        QEMU = &qemu as *const _ as u64;
     }
 
     // Overwrite the QEMU vcpu loop with the fuzzer
-    emu.set_vcpu_start(on_vcpu);
+    qemu.set_vcpu_start(on_vcpu);
 
     // Start QEMU
-    unsafe {
-        emu.run();
-    }
+    qemu.run().unwrap();
 }
