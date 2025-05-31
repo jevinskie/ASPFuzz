@@ -1,0 +1,63 @@
+[workspace]
+members = ["fuzzer/amd_sp", "fuzzer/libasp"]
+default-members = ["fuzzer/amd_sp"]
+resolver = "2"
+
+[workspace.package]
+version = "0.9.15003000"
+license = "Unknown"
+
+
+[workspace.dependencies]
+ahash = { version = "0.8.12", workspace = true}
+arbitrary-int = { version = "1.3.0", workspace = true }
+backtrace = { version = "0.3.75", workspace = true}
+bitbybit = { version = "1.3.2", workspace = true}
+clap = { version = "4.5.38", workspace = true}
+document-features = { version = "0.2.11", workspace = true}
+fastbloom = { version = "0.11.0", workspace = true}
+fs2 = { version = "0.4.3", workspace = true}
+hashbrown = { version = "0.14.5", workspace = true, default-features = false, features = ["serde"]}
+libafl_bolts = { path = "LibAFL/libafl_bolts", workspace = true}
+libafl_derive = { path = "LibAFL/libafl_derive", workspace = true}
+libafl_intelpt = { path = "LibAFL/libafl_intelpt", workspace = true}
+libafl = { path = "LibAFL/libafl", workspace = true, default-features = false,  features = ["prelude"]}
+libafl_qemu_sys = { path = "LibAFL/libafl_qemu/libafl_qemu_sys", workspace = true}
+libafl_qemu_build = { path = "LibAFL/libafl_qemu/libafl_qemu_build", workspace = true}
+libafl_qemu = { path = "LibAFL/libafl_qemu", workspace = true, default-features = false, features = ["arm", "systemmode"] }
+libafl_targets = { path = "LibAFL/libafl_targets", workspace = true}
+paste = { version = "1.0.15", workspace = true}
+rangemap = { version = "1.5.1", workspace = true}
+serde_yaml = { version = "0.9.34+deprecated", workspace = true}
+toml = { version = "0.8.22", workspace = true}
+bindgen = { version = "0.71.1", workspace = true}
+cc = { version = "1.2.24", workspace = true}
+just = { version = "1.40.0", workspace = true}
+log = { version = "0.4.27", workspace = true}
+meminterval = { version = "0.4.1", workspace = true}
+nix = { version = "0.30.1", workspace = true, default-features = false}
+num-traits = { version = "0.2.19", workspace = true, default-features = false}
+num_enum = { version = "0.7.3", workspace = true, default-features = false }
+postcard = { version = "1.1.1", workspace = true, features = ["alloc"] }
+pyo3 = { version = "0.24.2", workspace = true }
+pyo3-build-config = { version = "0.24.2", workspace = true }
+
+regex = { version = "1.11.1", workspace = true }
+rustversion = { version = "1.0.21", workspace = true }
+serde = { version = "1.0.219", workspace = true, default-features = false, features = ["alloc"]}
+serde_json = { version = "1.0.140", workspace = true, default-features = false}
+serial_test = { version = "3.2.0", workspace = true, default-features = false}
+typed-builder = { version = "0.21.0", workspace = true }
+uuid = { version = "1.17.0", workspace = true }
+static_assertions = { version = "1.1.0", workspace = true }
+libc = { version = "0.2.172", workspace = true }
+z3 = { version = "0.12.1", workspace = true }
+windows = { version = "0.61.1", workspace = true }
+typeid = { version = "1.0.3", workspace = true }
+libipt = { version = "0.3.0", workspace =  true }
+strum = { version = "0.27.1", workspace = true }
+strum_macros = { version = "0.27.1", workspace = true }
+which = { version = "7.0.3", workspace = true }
+
+[workspace.lints]
+
