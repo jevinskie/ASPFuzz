@@ -18,7 +18,7 @@ pub struct ResetState {
     saved :                 bool,
     sram_size:              GuestAddr,
     num_loads :             usize,
-    regs :                  Vec<u64>,
+    regs :                  Vec<GuestReg>,
     sram :                  Vec<u8>,
     timer_count_0 :         u64,
     timer_count_1 :         u64,
@@ -109,9 +109,7 @@ impl ResetState {
 
         // Saving SRAM
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
-        unsafe {
-            cpu.read_mem(SRAM_START, &mut self.sram);
-        }
+        cpu.read_mem(SRAM_START, &mut self.sram);
 
         // Saving ASP timer state
         unsafe {
@@ -212,9 +210,7 @@ impl ResetState {
 
         // Zero SRAM
         let zero_sram = vec![0; self.sram_size.try_into().unwrap()];
-        unsafe {
-            cpu.write_mem(SRAM_START, &zero_sram);
-        }
+        cpu.write_mem(SRAM_START, &zero_sram);
 
         // Zero timer
         unsafe {
@@ -234,10 +230,12 @@ impl ResetState {
 
         // Run until fuzzing start address
         qemu.set_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
-        qemu.start(&cpu);
+        unsafe {
+        qemu.run();
+        }
         qemu.remove_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
-        let pc: u64 = cpu.read_reg(Regs::Pc).unwrap();
+        let pc = cpu.read_reg(Regs::Pc).unwrap();
         log::debug!("After CPU reset: PC={:#x}", pc);
     }
 

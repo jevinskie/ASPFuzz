@@ -163,7 +163,8 @@ where
 impl Named for ExceptionFeedback {
     #[inline]
     fn name(&self) -> &Cow<'static, str> {
-        "ExceptionFeedback"
+        static NAME: Cow<'static, str> = Cow::Borrowed("ExceptionFeedback");
+        &NAME
     }
 }
 

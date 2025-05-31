@@ -37,7 +37,7 @@ libafl_bolts::impl_serdeany!(CustomMetadata);
 impl CustomMetadata {
     /// Creates a new [`struct@CustomMetadata`]
     #[must_use]
-    pub fn new(regs: Vec<u64>) -> Self {
+    pub fn new(regs: Vec<GuestReg>) -> Self {
         Self {
             r0: format!("{:#010x}", regs[0]),
             r1: format!("{:#010x}", regs[1]),
@@ -102,7 +102,8 @@ where
 impl Named for CustomMetadataFeedback {
     #[inline]
     fn name(&self) -> &Cow<'static, str> {
-        "CustomMetadataFeedback"
+        static NAME: Cow<'static, str> = Cow::Borrowed("CustomMetadataFeedback");
+        &NAME
     }
 }
 

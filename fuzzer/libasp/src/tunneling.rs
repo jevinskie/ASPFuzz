@@ -10,21 +10,21 @@ static mut TUNNELS_CMPS: Vec<(GuestAddr, String)> = vec![];
 pub fn add_tunnels_cmp(addr: GuestAddr, r0: &str, qemu: &Qemu) {
     let cmp = (addr, r0.to_string());
     unsafe { TUNNELS_CMPS.push(cmp); }
-    qemu.set_hook(addr, tunnels_cmp_hook, qemu as *const _ as u64, false);
+    qemu.hooks().add_instruction_hooks(qemu as *const _ as u64, addr, tunnels_cmp_hook, false);
 }
 
-extern "C" fn tunnels_cmp_hook(pc: GuestAddr, data: u64) {
+extern "C" fn tunnels_cmp_hook(data: u64, pc: GuestAddr) {
     log::debug!("Tunnels cmp hook: pc={:#x}", pc);
     let qemu = unsafe { (data as *const Qemu).as_ref().unwrap() };
     for cmp in unsafe { TUNNELS_CMPS.iter() } {
         if cmp.0 == pc {
             log::debug!("Found matching tunnels cmp: [{:#x}, {}]", cmp.0, cmp.1);
             if cmp.1.parse::<GuestAddr>().is_ok(){
-                qemu.write_reg(Regs::R0 as i32, cmp.1.parse::<u32>().unwrap()).unwrap();
+                qemu.write_reg(Regs::R0, cmp.1.parse::<u32>().unwrap()).unwrap();
                 break;
             } else {
-                let r0: u64 = qemu.read_reg(str_reg_to_regs(&cmp.1)).unwrap();
-                qemu.write_reg(Regs::R0 as i32, r0).unwrap();
+                let r0 = qemu.read_reg(str_reg_to_regs(&cmp.1)).unwrap();
+                qemu.write_reg(Regs::R0, r0).unwrap();
                 break;
             }
         }
