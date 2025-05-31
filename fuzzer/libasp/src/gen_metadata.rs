@@ -78,7 +78,7 @@ where
         &mut self,
         _state: &mut S,
         _manager: &mut EM,
-        _input: &S::Input,
+        _input: &I,
         _observers: &OT,
         _exit_kind: &ExitKind,
     ) -> Result<bool, Error>
@@ -87,7 +87,7 @@ where
         Ok(true)
     }
 
-    fn append_metadata(&mut self, _state: &mut S, testcase: &mut Testcase<S::Input>) -> Result<(), Error> {
+    fn append_metadata(&mut self, _state: &mut S, _event: &mut EM, _outty: &OT, testcase: &mut Testcase<I>) -> Result<(), Error> {
         let qemu = unsafe { (self.emulator as *const Qemu).as_ref().unwrap() };
         // Read regs
         let mut regs = Vec::new();

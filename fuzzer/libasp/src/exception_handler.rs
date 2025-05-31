@@ -143,7 +143,7 @@ where
         &mut self,
         _state: &mut S,
         _manager: &mut EM,
-        _input: &S::Input,
+        _input: &I,
         _observers: &OT,
         _exit_kind: &ExitKind,
     ) -> Result<bool, Error>
