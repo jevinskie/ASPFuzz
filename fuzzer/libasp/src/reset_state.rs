@@ -4,6 +4,7 @@ use std::fmt::{
     Debug,
     Formatter,
 };
+use libafl_qemu::qemu::Qemu;
 use libafl_qemu::*;
 use std::io::Write;
 use std::fs::File;
@@ -98,16 +99,16 @@ impl ResetState {
         }
     }
 
-    fn save_full(&mut self, emu: &Emulator) {
+    fn save_full(&mut self, qemu: &Qemu) {
         log::info!("Saving full snapshot");
 
         // Saving registers
         for r in Regs::iter() {
-            self.regs.push(emu.read_reg(r).unwrap());
+            self.regs.push(qemu.read_reg(r).unwrap());
         }
 
         // Saving SRAM
-        let cpu = emu.current_cpu().unwrap(); // ctx switch safe
+        let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
         unsafe {
             cpu.read_mem(SRAM_START, &mut self.sram);
         }
@@ -127,40 +128,36 @@ impl ResetState {
     }
 
     /* Super lazy reset */
-    fn load_super_lazy(&self, emu: &Emulator) {
+    fn load_super_lazy(&self, qemu: &Qemu) {
         // Resetting registers
         for (r, v) in self.regs.iter().enumerate() {
-            emu.write_reg(r as i32, *v).unwrap();
+            qemu.write_reg(r as i32, *v).unwrap();
         }
     }
 
     /* Lazy snapshot reset */
-    fn load_lazy(&self, emu: &Emulator) {
+    fn load_lazy(&self, qemu: &Qemu) {
         log::info!("Loading lazy");
 
         // Resetting registers
-        self.load_super_lazy(emu);
+        self.load_super_lazy(qemu);
 
         // Resetting SRAM (predefined section)
-        let cpu = emu.current_cpu().unwrap(); // ctx switch safe
+        let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
         let sram_slice = &self.sram[((self.sram_size-LAZY_SRAM_SIZE) as usize)..(self.sram_size as usize)];
-        unsafe {
-            cpu.write_mem(self.sram_size-LAZY_SRAM_SIZE, &sram_slice);
-        }
+        cpu.write_mem(self.sram_size-LAZY_SRAM_SIZE, &sram_slice);
     }
 
     /* Rust snapshot reset */
-    fn load_rust_snapshot(&self, emu: &Emulator) {
+    fn load_rust_snapshot(&self, qemu: &Qemu) {
         log::info!("Loading Rust snapshot");
 
         // Resetting registers
-        self.load_super_lazy(emu);
+        self.load_super_lazy(qemu);
 
         // Resetting SRAM
-        let cpu = emu.current_cpu().unwrap(); // ctx switch safe
-        unsafe {
-            cpu.write_mem(SRAM_START, &self.sram);
-        }
+        let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
+        cpu.write_mem(SRAM_START, &self.sram);
 
         // Resetting timer
         unsafe {
@@ -199,18 +196,18 @@ impl ResetState {
     }
 
     /* Qemu snapshot reset */
-    fn load_qemu_snapshot(&self, _emu: &Emulator) {
+    fn load_qemu_snapshot(&self, _qemu: &Qemu) {
         panic!("QEMU snapshot unimplemented!");
     }
 
     /* Hard reset */
-    fn load_hard_reset(&self, emu: &Emulator) {
+    fn load_hard_reset(&self, qemu: &Qemu) {
         log::info!("Loading hard snapshot");
 
         // Resetting CPU
         log::debug!("Starting CPU reset");
-        let cpu = emu.current_cpu().unwrap(); // ctx switch safe
-        cpu.cpu_reset();
+        let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
+        cpu.reset();
         log::debug!("CPU reset successful");
 
         // Zero SRAM
@@ -236,10 +233,10 @@ impl ResetState {
         }
 
         // Run until fuzzing start address
-        emu.set_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
-        emu.start(&cpu);
-        emu.remove_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
-        let cpu = emu.current_cpu().unwrap(); // ctx switch safe
+        qemu.set_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
+        qemu.start(&cpu);
+        qemu.remove_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
+        let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
         let pc: u64 = cpu.read_reg(Regs::Pc).unwrap();
         log::debug!("After CPU reset: PC={:#x}", pc);
     }
@@ -249,44 +246,42 @@ impl ResetState {
         file.write(&self.sram).unwrap();
     }
 
-    pub fn current_sram_to_file(&mut self, emu: &Emulator) {
-        let cpu = emu.current_cpu().unwrap(); // ctx switch safe
-        unsafe {
-            cpu.write_mem(SRAM_START, &self.sram);
-        }
+    pub fn current_sram_to_file(&mut self, qemu: &Qemu) {
+        let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
+        cpu.write_mem(SRAM_START, &self.sram);
         let mut file = File::create("sram.dump").unwrap();
         file.write(&self.sram).unwrap();
     }
 }
 
 pub trait Reset {
-    fn save(&mut self, emu: &Emulator, level: &ResetLevel);
-    fn load(&mut self, emu: &Emulator, level: &ResetLevel);
+    fn save(&mut self, qemu: &Qemu, level: &ResetLevel);
+    fn load(&mut self, qemu: &Qemu, level: &ResetLevel);
 }
 
 impl Reset for ResetState {
-    fn save(&mut self, emu: &Emulator, level: &ResetLevel) {
+    fn save(&mut self, qemu: &Qemu, level: &ResetLevel) {
         if self.saved {
             log::error!("State has already been saved!");
             return
         }
         match level {
-            ResetLevel::SuperLazy => self.save_full(emu),
-            ResetLevel::Lazy => self.save_full(emu),
-            ResetLevel::RustSnapshot => self.save_full(emu),
-            ResetLevel::QemuSnapshot => self.save_full(emu),
-            ResetLevel::HardReset => self.save_full(emu),
+            ResetLevel::SuperLazy => self.save_full(qemu),
+            ResetLevel::Lazy => self.save_full(qemu),
+            ResetLevel::RustSnapshot => self.save_full(qemu),
+            ResetLevel::QemuSnapshot => self.save_full(qemu),
+            ResetLevel::HardReset => self.save_full(qemu),
         };
         self.saved = true;
     }
 
-    fn load(&mut self, emu: &Emulator, level: &ResetLevel){
+    fn load(&mut self, qemu: &Qemu, level: &ResetLevel){
         match level {
-            ResetLevel::SuperLazy => self.load_super_lazy(emu),
-            ResetLevel::Lazy => self.load_lazy(emu),
-            ResetLevel::RustSnapshot => self.load_rust_snapshot(emu),
-            ResetLevel::QemuSnapshot => self.load_qemu_snapshot(emu),
-            ResetLevel::HardReset => self.load_hard_reset(emu),
+            ResetLevel::SuperLazy => self.load_super_lazy(qemu),
+            ResetLevel::Lazy => self.load_lazy(qemu),
+            ResetLevel::RustSnapshot => self.load_rust_snapshot(qemu),
+            ResetLevel::QemuSnapshot => self.load_qemu_snapshot(qemu),
+            ResetLevel::HardReset => self.load_hard_reset(qemu),
         };
         self.num_loads += 1;
     }

@@ -1,5 +1,6 @@
 /// Catching and handling ARM CPU exceptions durign the test-case execution
 
+use libafl_qemu::qemu::Qemu;
 use libafl_qemu::*;
 use libafl::prelude::*;
 use libafl_bolts::Named;
@@ -68,31 +69,31 @@ impl ExceptionHandler {
         }
     }
 
-    pub fn start(&self, emu: &Emulator) {
+    pub fn start(&self, qemu: &Qemu) {
         unsafe { EXCEPTION_VECTOR_BASE = self.exception_vector_base};
-        //emu.set_hook(self.exception_addr_reset, exception_hook, emu as *const _ as u64, false);
-        emu.set_hook(self.exception_addr_undef, exception_hook, emu as *const _ as u64, false);
-        emu.set_hook(self.exception_addr_svc, exception_hook, emu as *const _ as u64, false);
-        emu.set_hook(self.exception_addr_preab, exception_hook, emu as *const _ as u64, false);
-        emu.set_hook(self.exception_addr_datab, exception_hook, emu as *const _ as u64, false);
-        emu.set_hook(self.exception_addr_hyp, exception_hook, emu as *const _ as u64, false);
-        emu.set_hook(self.exception_addr_irq, exception_hook, emu as *const _ as u64, false);
-        emu.set_hook(self.exception_addr_fiq, exception_hook, emu as *const _ as u64, false);
+        // qemu.hooks().add_instruction_hooks(qemu as *const _ as u64, self.exception_addr_reset, exception_hook, false);
+        qemu.hooks().add_instruction_hooks(qemu as *const _ as u64, self.exception_addr_undef, exception_hook, false);
+        qemu.hooks().add_instruction_hooks(qemu as *const _ as u64, self.exception_addr_svc, exception_hook, false);
+        qemu.hooks().add_instruction_hooks(qemu as *const _ as u64, self.exception_addr_preab, exception_hook, false);
+        qemu.hooks().add_instruction_hooks(qemu as *const _ as u64, self.exception_addr_datab, exception_hook, false);
+        qemu.hooks().add_instruction_hooks(qemu as *const _ as u64, self.exception_addr_hyp, exception_hook, false);
+        qemu.hooks().add_instruction_hooks(qemu as *const _ as u64, self.exception_addr_irq, exception_hook, false);
+        qemu.hooks().add_instruction_hooks(qemu as *const _ as u64, self.exception_addr_fiq, exception_hook, false);
     }
 
-    pub fn stop(&self, emu: &Emulator) {
-        //let _ = emu.remove_hook(self.exception_addr_reset, true);
-        let _ = emu.remove_hook(self.exception_addr_undef, true);
-        let _ = emu.remove_hook(self.exception_addr_svc, true);
-        let _ = emu.remove_hook(self.exception_addr_preab, true);
-        let _ = emu.remove_hook(self.exception_addr_datab, true);
-        let _ = emu.remove_hook(self.exception_addr_hyp, true);
-        let _ = emu.remove_hook(self.exception_addr_irq, true);
-        let _ = emu.remove_hook(self.exception_addr_fiq, true);
+    pub fn stop(&self, qemu: &Qemu) {
+        // let _ = qemu.hooks().remove_instruction_hooks_at(self.exception_addr_reset, true);
+        let _ = qemu.hooks().remove_instruction_hooks_at(self.exception_addr_undef, true);
+        let _ = qemu.hooks().remove_instruction_hooks_at(self.exception_addr_svc, true);
+        let _ = qemu.hooks().remove_instruction_hooks_at(self.exception_addr_preab, true);
+        let _ = qemu.hooks().remove_instruction_hooks_at(self.exception_addr_datab, true);
+        let _ = qemu.hooks().remove_instruction_hooks_at(self.exception_addr_hyp, true);
+        let _ = qemu.hooks().remove_instruction_hooks_at(self.exception_addr_irq, true);
+        let _ = qemu.hooks().remove_instruction_hooks_at(self.exception_addr_fiq, true);
     }
 }
 
-extern "C" fn exception_hook(pc: GuestAddr, data: u64) {
+extern "C" fn exception_hook(data: u64, pc: GuestAddr) {
     log::debug!("Exception hook: pc={:#x}", pc);
 
     match ((pc - unsafe { EXCEPTION_VECTOR_BASE }) / 4).into() {
@@ -119,8 +120,8 @@ extern "C" fn exception_hook(pc: GuestAddr, data: u64) {
         _                       => log::error!("Unknown exception triggered"),
     }
 
-    let emu = unsafe { (data as *const Emulator).as_ref().unwrap() };
-    emu.current_cpu().unwrap().trigger_breakpoint();
+    let qemu = unsafe { (data as *const Qemu).as_ref().unwrap() };
+    qemu.current_cpu().unwrap().trigger_breakpoint();
 }
 
 static mut HOOK_TRIGGERED: usize = 0;
@@ -128,12 +129,17 @@ static mut HOOK_TRIGGERED: usize = 0;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ExceptionFeedback {}
 
-impl<S> Feedback<S> for ExceptionFeedback
+impl<S> StateInitializer<S> for ExceptionFeedback {}
+
+
+impl<EM, I, OT, S> Feedback<EM, I, OT, S> for ExceptionFeedback
 where
-    S: UsesInput + HasClientPerfMonitor,
+    S: HasClientPerfMonitor,
+    EM: EventFirer<I, S>,
+    OT: ObserversTuple<I, S>,
 {
     #[allow(clippy::wrong_self_convention)]
-    fn is_interesting<EM, OT>(
+    fn is_interesting(
         &mut self,
         _state: &mut S,
         _manager: &mut EM,
@@ -141,9 +147,6 @@ where
         _observers: &OT,
         _exit_kind: &ExitKind,
     ) -> Result<bool, Error>
-    where
-        EM: EventFirer,
-        OT: ObserversTuple<S>,
     {
         unsafe{
             if HOOK_TRIGGERED != 0 {

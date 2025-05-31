@@ -1,6 +1,7 @@
 /// Generating metadata whenever a test-case is an objective
 /// Saves all register values
 
+use libafl_qemu::qemu::Qemu;
 use libafl_qemu::*;
 use libafl::prelude::*;
 use libafl_bolts::Named;
@@ -64,12 +65,16 @@ pub struct CustomMetadataFeedback {
     emulator: u64,
 }
 
-impl<S> Feedback<S> for CustomMetadataFeedback
+impl<S> StateInitializer<S> for CustomMetadataFeedback {}
+
+impl<EM, I, OT, S> Feedback<EM, I, OT, S> for CustomMetadataFeedback
 where
-    S: UsesInput  + HasClientPerfMonitor,
+    S: HasClientPerfMonitor,
+    EM: EventFirer<I, S>,
+    OT: ObserversTuple<I, S>,
 {
     #[allow(clippy::wrong_self_convention)]
-    fn is_interesting<EM, OT>(
+    fn is_interesting(
         &mut self,
         _state: &mut S,
         _manager: &mut EM,
@@ -77,20 +82,17 @@ where
         _observers: &OT,
         _exit_kind: &ExitKind,
     ) -> Result<bool, Error>
-    where
-        EM: EventFirer,
-        OT: ObserversTuple<S>,
     {
         log::info!("CustomMetadataFeedback=True");
         Ok(true)
     }
 
     fn append_metadata(&mut self, _state: &mut S, testcase: &mut Testcase<S::Input>) -> Result<(), Error> {
-        let emu = unsafe { (self.emulator as *const Emulator).as_ref().unwrap() };
+        let qemu = unsafe { (self.emulator as *const Qemu).as_ref().unwrap() };
         // Read regs
         let mut regs = Vec::new();
         for r in Regs::iter() {
-           regs.push(emu.read_reg(r).unwrap());
+           regs.push(qemu.read_reg(r).unwrap());
         }
         testcase.add_metadata(CustomMetadata::new(regs));
         Ok(())
