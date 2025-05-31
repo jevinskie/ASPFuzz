@@ -1,10 +1,16 @@
-use libafl::corpus::ondisk::OnDiskMetadataFormat;
+use libafl::corpus::{OnDiskCorpus};
+use libafl::prelude::ondisk::OnDiskMetadataFormat;
 use libafl::prelude::*;
 use libafl_qemu::qemu::Qemu;
-use libafl_qemu::modules::EmulatorModuleTuple;
+use libafl_qemu::qemu::CPU;
+use libafl_qemu::modules::{EmulatorModuleTuple, DrCovModule};
+use libafl_qemu::modules::edges::StdEdgeCoverageModuleBuilder;
+use libafl_qemu::modules::utils::filters::StdAddressFilter;
 use libafl_qemu::*;
-use libafl_bolts::{current_nanos, tuple_list, AsSlice};
-use libafl_bolts::prelude::{StdRand, dup2};
+use libafl_bolts::{current_nanos, AsSlice};
+use libafl_bolts::tuples::tuple_list;
+use libafl_bolts::prelude::{StdRand, dup2, OwnedMutSlice};
+use libafl_targets::{edges_map_mut_ptr, EDGES_MAP_ALLOCATED_SIZE, MAX_EDGES_FOUND};
 
 use libasp::*;
 
@@ -364,7 +370,7 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
 
         // After the emulator finished
         pc = cpu.read_reg(Regs::Pc).unwrap();
-        let r0: u64 = cpu.read_reg(Regs::R0).unwrap();
+        let r0 = cpu.read_reg(Regs::R0).unwrap();
         log::debug!("End at {:#x} with R0={:#x}", pc, r0);
         unsafe { COUNTER_SNAPSHOT += 1; }
         // Look for crashes if no sink was hit
@@ -387,10 +393,14 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
     #[allow(unused_mut)]
     let mut run_client = |state: Option<_>, mut mgr, _core_id| -> Result<(), Error> {
         // Create an observation channel using the coverage map
-        let edges = unsafe { &mut edges::EDGES_MAP };
-        let edges_counter = unsafe { &mut edges::MAX_EDGES_NUM };
-        let edges_observer =
-            HitcountsMapObserver::new(VariableMapObserver::new("edges", edges, edges_counter));
+        let mut edges_observer = unsafe {
+            HitcountsMapObserver::new(VariableMapObserver::from_mut_slice(
+                "edges",
+                OwnedMutSlice::from_raw_parts_mut(edges_map_mut_ptr(), EDGES_MAP_ALLOCATED_SIZE),
+                &raw mut MAX_EDGES_FOUND,
+            ))
+            .track_indices()
+        };
 
         // Feedback to rate the interestingness of an input
         let mut feedback = MaxMapFeedback::new(&edges_observer);
@@ -424,7 +434,7 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
                 InMemoryCorpus::new(),
                 // Corpus in which we store solutions,
                 // on disk so the user can get them after stopping the fuzzer
-                OnDiskCorpus::new_save_meta(cloned_solutions_dir, Some(OnDiskMetadataFormat::JsonPretty)).unwrap(),
+                OnDiskCorpus::new(cloned_solutions_dir).unwrap(),
                 // States of the feedbacks.
                 // The feedbacks can report the data that should persist in the State.
                 &mut feedback,
@@ -454,9 +464,9 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
 
         // Configure QEMU hook helper
         let mut hooks = QemuHooks::get(tuple_list!(
-                EdgeCoverageModuleBuilder::new(QemuInstrumentationFilter::None),
-                DrCovModuleBuilder::new(
-                    QemuInstrumentationFilter::None,
+                StdEdgeCoverageModuleBuilder::default(),
+                DrCovModule::new(
+                    StdAddressFilter::default(),
                     rangemap,
                     log_drcov_path,
                     false,

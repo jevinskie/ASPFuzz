@@ -22,6 +22,7 @@ debug = true
 libafl = { path = "../../LibAFL/libafl/", default-features = false, features = ["prelude"] }
 libafl_qemu = { path = "../../LibAFL/libafl_qemu/", features = ["arm", "systemmode"], default-features = false }
 libafl_bolts = { path = "../../LibAFL/libafl_bolts/" }
+libafl_targets = { path = "../../LibAFL/libafl_targets/" }
 
 libasp = { path = "../libasp" }
 
