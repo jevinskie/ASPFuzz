@@ -487,34 +487,35 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
         );
 
         // Configure QEMU hook helper
-        let mut hooks = QemuHooks::get()
-            .unwrap()
-            .new(tuple_list!(
-                StdEdgeCoverageModuleBuilder::default(),
-                DrCovModule::new(
-                    StdAddressFilter::default(),
-                    log_drcov_path,
-                    Some(rangemap),
-                    false,
-                )
-            ))
-            .unwrap();
+        // let mut hooks = QemuHooks::get()
+        //     .unwrap()
+        //     .new(tuple_list!(
+        //         StdEdgeCoverageModuleBuilder::default(),
+        //         DrCovModule::new(
+        //             StdAddressFilter::default(),
+        //             log_drcov_path,
+        //             Some(rangemap),
+        //             false,
+        //         )
+        //     ))
+        //     .unwrap();
 
         // Block hooks and write hooks for crash detection
-        hooks.blocks_raw(Some(gen_block_hook), Some(exec_block_hook));
-        if conf.crashes_mmap_no_write_hooks.len() != 0 {
-            log::debug!("Adding write generation hooks");
-            hooks.writes_raw(
-                Some(gen_writes_hook),
-                Some(exec_writes_hook),
-                Some(exec_writes_hook),
-                Some(exec_writes_hook),
-                Some(exec_writes_hook),
-                Some(exec_writes_hook_n),
-            );
-        } else {
-            log::debug!("No write generation hooks");
-        }
+        // hooks.blocks_raw(Some(gen_block_hook), Some(exec_block_hook));
+        // if conf.crashes_mmap_no_write_hooks.len() != 0 {
+        //     log::debug!("Adding write generation hooks");
+        //     hooks.writes_raw(
+        //         Some(gen_writes_hook),
+        //         Some(exec_writes_hook),
+        //         Some(exec_writes_hook),
+        //         Some(exec_writes_hook),
+        //         Some(exec_writes_hook),
+        //         Some(exec_writes_hook_n),
+        //     );
+        // } else {
+        //     log::debug!("No write generation hooks");
+        // }
+        let mut hooks = QemuHooks::get().unwrap();
 
         let timeout = Duration::new(5, 0); // 5sec
         let mut executor = QemuExecutor::new(
@@ -744,7 +745,7 @@ pub fn fuzz() {
     let qemu_args = parse_args();
 
     // Setup QEMU
-    let qemu = Qemu::new(&qemu_args, &env);
+    let qemu = Qemu::init(&qemu_args).unwrap();
     unsafe {
         QEMU = &qemu as *const _ as u64;
     }
@@ -753,5 +754,5 @@ pub fn fuzz() {
     // qemu.set_vcpu_start(on_vcpu);
 
     // Start QEMU
-    qemu.run().unwrap();
+    unsafe { qemu.run() }.unwrap();
 }
