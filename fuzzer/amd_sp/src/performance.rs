@@ -322,9 +322,9 @@ pub fn fuzz() {
     dup2(null_fd, io::stderr().as_raw_fd()).unwrap();
 
     // Start emulator
-    let emu = Emulator::new(&qemu_args, &env);
-    emu.set_vcpu_start(on_vcpu);
+    let qemu = Qemu::new(&qemu_args, &env);
+    qemu.set_vcpu_start(on_vcpu);
     unsafe {
-        emu.run();
+        qemu.run();
     }
 }

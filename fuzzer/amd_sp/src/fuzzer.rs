@@ -1,7 +1,6 @@
 use libafl::corpus::{OnDiskCorpus};
 use libafl::prelude::*;
 use libafl_qemu::qemu::Qemu;
-use libafl_qemu::qemu::CPU;
 use libafl_qemu::modules::{EmulatorModuleTuple, DrCovModule};
 use libafl_qemu::modules::edges::StdEdgeCoverageModuleBuilder;
 use libafl_qemu::modules::utils::filters::StdAddressFilter;
@@ -229,8 +228,7 @@ fn print_input(input: &[u8]) {
     log::info!("{}", out_str);
 }
 
-extern "C" fn on_vcpu(mut cpu: CPU) {
-    let qemu = cpu.emulator();
+extern "C" fn on_vcpu(mut qemu: Qemu) {
     let conf = borrow_global_conf().unwrap();
 
     // Create directory for this run
@@ -304,9 +302,9 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
 
     // Go to FUZZ_START
     qemu.set_breakpoint(conf.harness_start);
-    qemu.start(&cpu);
+    qemu.run();
     qemu.remove_breakpoint(conf.harness_start);
-    cpu = qemu.current_cpu().unwrap(); // ctx switch safe
+    let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
     let pc = cpu.read_reg(Regs::Pc).unwrap();
     log::debug!("#### First exit at {:#x} ####", pc);
 
@@ -350,7 +348,7 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
         let mut buffer = vec![0; conf.input_total_size];
         buffer[..target_buf.len()].copy_from_slice(target_buf);
         let mut buffer = buffer.as_slice();
-        cpu = qemu.current_cpu().unwrap(); // ctx switch safe
+        let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
         for mem in conf.input_mem.iter() {
             unsafe { write_flash_mem(mem.0, &buffer[..mem.1]); }
             buffer = &buffer[mem.1..];
@@ -365,7 +363,7 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
         // Start the emulation
         let mut pc = cpu.read_reg(Regs::Pc).unwrap();
         log::debug!("Start at {:#x}", pc);
-        qemu.start(&cpu);
+        qemu.run();
 
         // After the emulator finished
         pc = cpu.read_reg(Regs::Pc).unwrap();
@@ -489,18 +487,16 @@ extern "C" fn on_vcpu(mut cpu: CPU) {
         }
 
         let timeout = Duration::new(5, 0); // 5sec
-        let mut executor = TimeoutExecutor::new(
-            QemuExecutor::new(
+        let mut executor = QemuExecutor::new(
                 &mut hooks,
                 &mut harness,
                 tuple_list!(edges_observer),
                 &mut fuzzer,
                 &mut state,
                 &mut mgr,
+                timeout,
             )
-            .unwrap(),
-            timeout,
-        );
+            .unwrap();
 
         state
             .load_initial_inputs_forced(&mut fuzzer, &mut executor, &mut mgr, &[input_dir.clone()])
@@ -707,7 +703,7 @@ pub fn fuzz() {
     }
 
     // Overwrite the QEMU vcpu loop with the fuzzer
-    qemu.set_vcpu_start(on_vcpu);
+    // qemu.set_vcpu_start(on_vcpu);
 
     // Start QEMU
     qemu.run().unwrap();
