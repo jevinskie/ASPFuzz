@@ -1,30 +1,24 @@
 /// Custom resetting of the state aka. snapshotting
+use std::fmt::{Debug, Formatter};
+use std::{fs::File, io::Write, str::FromStr};
 
-use std::fmt::{
-    Debug,
-    Formatter,
-};
-use libafl_qemu::qemu::Qemu;
-use libafl_qemu::*;
-use std::io::Write;
-use std::fs::File;
-use std::str::FromStr;
+use libafl_qemu::{qemu::Qemu, *};
 use log;
 
-const SRAM_START : GuestAddr        = 0x0;
-const LAZY_SRAM_SIZE : GuestAddr    = 0x1300;
+const SRAM_START: GuestAddr = 0x0;
+const LAZY_SRAM_SIZE: GuestAddr = 0x1300;
 
 pub struct ResetState {
-    saved :                 bool,
-    sram_size:              GuestAddr,
-    num_loads :             usize,
-    regs :                  Vec<GuestReg>,
-    sram :                  Vec<u8>,
-    timer_count_0 :         u64,
-    timer_count_1 :         u64,
-    timer_control_0 :       u64,
-    timer_control_1 :       u64,
-    smn_slots :             [u32; 32],
+    saved: bool,
+    sram_size: GuestAddr,
+    num_loads: usize,
+    regs: Vec<GuestReg>,
+    sram: Vec<u8>,
+    timer_count_0: u64,
+    timer_count_1: u64,
+    timer_control_0: u64,
+    timer_control_1: u64,
+    smn_slots: [u32; 32],
 }
 
 #[derive(Default)]
@@ -86,16 +80,16 @@ extern "C" {
 impl ResetState {
     pub fn new(sram_size: GuestAddr) -> Self {
         Self {
-            saved :             false,
-            sram_size:          sram_size,
-            num_loads :         0,
-            regs :              vec![],
-            sram :              vec![0; sram_size.try_into().unwrap()],
-            timer_count_0 :     0,
-            timer_count_1 :     0,
-            timer_control_0 :   0,
-            timer_control_1 :   0,
-            smn_slots :         [0; 32],
+            saved: false,
+            sram_size: sram_size,
+            num_loads: 0,
+            regs: vec![],
+            sram: vec![0; sram_size.try_into().unwrap()],
+            timer_count_0: 0,
+            timer_count_1: 0,
+            timer_control_0: 0,
+            timer_control_1: 0,
+            smn_slots: [0; 32],
         }
     }
 
@@ -142,8 +136,10 @@ impl ResetState {
 
         // Resetting SRAM (predefined section)
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
-        let sram_slice = &self.sram[((self.sram_size-LAZY_SRAM_SIZE) as usize)..(self.sram_size as usize)];
-        cpu.write_mem(self.sram_size-LAZY_SRAM_SIZE, &sram_slice).unwrap();
+        let sram_slice =
+            &self.sram[((self.sram_size - LAZY_SRAM_SIZE) as usize)..(self.sram_size as usize)];
+        cpu.write_mem(self.sram_size - LAZY_SRAM_SIZE, &sram_slice)
+            .unwrap();
     }
 
     /* Rust snapshot reset */
@@ -180,10 +176,14 @@ impl ResetState {
         // Resetting SMN slot controller
         let current_smn_slots;
         unsafe {
-            current_smn_slots =  aspfuzz_smn_slots;
+            current_smn_slots = aspfuzz_smn_slots;
             aspfuzz_smn_slots = self.smn_slots;
         }
-        for (i, (snapshot, current)) in current_smn_slots.iter().zip(self.smn_slots.iter()).enumerate() {
+        for (i, (snapshot, current)) in current_smn_slots
+            .iter()
+            .zip(self.smn_slots.iter())
+            .enumerate()
+        {
             if snapshot != current {
                 log::debug!("SMN slot {i} not correct anymore:");
                 log::debug!("\tsnapshot: {snapshot:#x}");
@@ -223,16 +223,14 @@ impl ResetState {
         // Zero SMN slots
         unsafe {
             aspfuzz_smn_slots = [0; 32];
-            for (i,_) in aspfuzz_smn_slots.iter().enumerate() {
+            for (i, _) in aspfuzz_smn_slots.iter().enumerate() {
                 aspfuzz_smn_update_slot(i as u32)
             }
         }
 
         // Run until fuzzing start address
         qemu.set_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
-        unsafe {
-        qemu.run()
-        }.unwrap();
+        unsafe { qemu.run() }.unwrap();
         qemu.remove_breakpoint(self.regs[Regs::Pc as usize] as GuestAddr);
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
         let pc = cpu.read_reg(Regs::Pc).unwrap();
@@ -261,7 +259,7 @@ impl Reset for ResetState {
     fn save(&mut self, qemu: &Qemu, level: &ResetLevel) {
         if self.saved {
             log::error!("State has already been saved!");
-            return
+            return;
         }
         match level {
             ResetLevel::SuperLazy => self.save_full(qemu),
@@ -273,7 +271,7 @@ impl Reset for ResetState {
         self.saved = true;
     }
 
-    fn load(&mut self, qemu: &Qemu, level: &ResetLevel){
+    fn load(&mut self, qemu: &Qemu, level: &ResetLevel) {
         match level {
             ResetLevel::SuperLazy => self.load_super_lazy(qemu),
             ResetLevel::Lazy => self.load_lazy(qemu),
@@ -286,7 +284,7 @@ impl Reset for ResetState {
 }
 
 impl Debug for ResetLevel {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(),std::fmt::Error> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         let mut out_str = "".to_string();
         match *self {
             ResetLevel::SuperLazy => out_str.push_str(&"SuperLazy".to_string()),
@@ -303,12 +301,12 @@ impl FromStr for ResetLevel {
     type Err = ();
     fn from_str(input: &str) -> Result<ResetLevel, ()> {
         match input {
-            "SuperLazy"     => Ok(ResetLevel::SuperLazy),
-            "Lazy"          => Ok(ResetLevel::Lazy),
-            "RustSnapshot"  => Ok(ResetLevel::RustSnapshot),
-            "QemuSnapshot"  => Ok(ResetLevel::QemuSnapshot),
-            "HardReset"     => Ok(ResetLevel::HardReset),
-            _               => Err(()),
+            "SuperLazy" => Ok(ResetLevel::SuperLazy),
+            "Lazy" => Ok(ResetLevel::Lazy),
+            "RustSnapshot" => Ok(ResetLevel::RustSnapshot),
+            "QemuSnapshot" => Ok(ResetLevel::QemuSnapshot),
+            "HardReset" => Ok(ResetLevel::HardReset),
+            _ => Err(()),
         }
     }
 }
@@ -318,7 +316,10 @@ impl Debug for ResetState {
         let mut out_str = "".to_string();
 
         /* Stats to string */
-        out_str.push_str(&format!("[{}]\n", if self.saved { "INIT" } else { "UNINIT" }));
+        out_str.push_str(&format!(
+            "[{}]\n",
+            if self.saved { "INIT" } else { "UNINIT" }
+        ));
         out_str.push_str(&"Stats:\n".to_string());
         out_str.push_str(&format!("\tLoads =\t{}\n", self.num_loads));
 
@@ -327,14 +328,14 @@ impl Debug for ResetState {
         for (i, item) in self.regs.iter().enumerate() {
             let mut reg_name: String = "UDef".to_string();
             if i < 13 {
-                reg_name = format!("R{}", i+1);
-            }else if i == 13 {
+                reg_name = format!("R{}", i + 1);
+            } else if i == 13 {
                 reg_name = "Sp".to_string();
-            }else if i == 14 {
+            } else if i == 14 {
                 reg_name = "Lr".to_string();
-            }else if i == 15 {
+            } else if i == 15 {
                 reg_name = "Pc".to_string();
-            }else if i == 16 {
+            } else if i == 16 {
                 reg_name = "CPSR".to_string();
             }
             let item_str = format!("\t{} =\t{:#08X}\n", reg_name, *item as usize);
@@ -343,12 +344,15 @@ impl Debug for ResetState {
 
         /* SRAM status to string */
         out_str.push_str(&"SRAM:\n".to_string());
-        out_str.push_str(&format!("\tNon zero =\t{}\n", self.sram.iter().filter(|&n| *n != 0).count()));
+        out_str.push_str(&format!(
+            "\tNon zero =\t{}\n",
+            self.sram.iter().filter(|&n| *n != 0).count()
+        ));
         let mut addr_first = 0;
         for (i, item) in self.sram.iter().enumerate() {
             if *item != 0 {
                 addr_first = i;
-                break
+                break;
             }
         }
         out_str.push_str(&format!("\tAddr first =\t{:#08X}\n", addr_first));

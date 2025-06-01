@@ -1,14 +1,13 @@
-/// Generating metadata whenever a test-case is an objective
-/// Saves all register values
+use std::borrow::Cow;
 
-use libafl_qemu::qemu::Qemu;
-use libafl_qemu::*;
 use libafl::prelude::*;
 use libafl_bolts::Named;
-
+/// Generating metadata whenever a test-case is an objective
+/// Saves all register values
+use libafl_qemu::qemu::Qemu;
+use libafl_qemu::*;
 use log;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 
 /// A custom testcase metadata
 #[derive(Debug, Serialize, Deserialize)]
@@ -81,18 +80,23 @@ where
         _input: &I,
         _observers: &OT,
         _exit_kind: &ExitKind,
-    ) -> Result<bool, Error>
-    {
+    ) -> Result<bool, Error> {
         log::info!("CustomMetadataFeedback=True");
         Ok(true)
     }
 
-    fn append_metadata(&mut self, _state: &mut S, _event: &mut EM, _outty: &OT, testcase: &mut Testcase<I>) -> Result<(), Error> {
+    fn append_metadata(
+        &mut self,
+        _state: &mut S,
+        _event: &mut EM,
+        _outty: &OT,
+        testcase: &mut Testcase<I>,
+    ) -> Result<(), Error> {
         let qemu = unsafe { (self.emulator as *const Qemu).as_ref().unwrap() };
         // Read regs
         let mut regs = Vec::new();
         for r in Regs::iter() {
-           regs.push(qemu.read_reg(r).unwrap());
+            regs.push(qemu.read_reg(r).unwrap());
         }
         testcase.add_metadata(CustomMetadata::new(regs));
         Ok(())
@@ -111,8 +115,6 @@ impl CustomMetadataFeedback {
     /// Creates a new [`CustomMetadataFeedback`]
     #[must_use]
     pub fn new(emulator: u64) -> Self {
-        Self {
-            emulator
-        }
+        Self { emulator }
     }
 }
