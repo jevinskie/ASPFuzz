@@ -1,36 +1,3 @@
-use libafl::corpus::{OnDiskCorpus};
-use libafl::prelude::*;
-use libafl_qemu::qemu::Qemu;
-use libafl_qemu::modules::{EmulatorModuleTuple, DrCovModule};
-use libafl_qemu::modules::edges::StdEdgeCoverageModuleBuilder;
-use libafl_qemu::modules::utils::filters::StdAddressFilter;
-use libafl_qemu::*;
-use libafl_bolts::{current_nanos, AsSlice};
-use libafl_bolts::tuples::tuple_list;
-use libafl_bolts::prelude::{StdRand, dup2, OwnedMutSlice};
-use libafl_targets::{edges_map_mut_ptr, EDGES_MAP_ALLOCATED_SIZE, MAX_EDGES_FOUND};
-
-use libasp::*;
-
-use rangemap::RangeMap;
-use clap::Parser;
-
-use log;
-use chrono::Local;
-use std::env;
-use std::fs;
-use std::path::{
-    Path,
-    PathBuf,
-};
-use std::time::Duration;
-use std::cell::RefCell;
-use std::fs::OpenOptions;
-use std::io::Write;
-use std::process::exit;
-
-#[cfg(not(feature = "multicore"))]
-use nix::{self, unistd::dup};
 #[cfg(not(feature = "multicore"))]
 use std::fs::File;
 #[cfg(not(feature = "multicore"))]
@@ -39,6 +6,39 @@ use std::io;
 use std::os::unix::io::AsRawFd;
 #[cfg(not(feature = "multicore"))]
 use std::os::unix::io::FromRawFd;
+use std::{
+    cell::RefCell,
+    env, fs,
+    fs::OpenOptions,
+    io::Write,
+    path::{Path, PathBuf},
+    process::exit,
+    time::Duration,
+};
+
+use chrono::Local;
+use clap::Parser;
+use libafl::{corpus::OnDiskCorpus, prelude::*};
+use libafl_bolts::{
+    current_nanos,
+    prelude::{dup2, OwnedMutSlice, StdRand},
+    tuples::tuple_list,
+    AsSlice,
+};
+use libafl_qemu::{
+    modules::{
+        edges::StdEdgeCoverageModuleBuilder, utils::filters::StdAddressFilter, DrCovModule,
+        EmulatorModuleTuple,
+    },
+    qemu::Qemu,
+    *,
+};
+use libafl_targets::{edges_map_mut_ptr, EDGES_MAP_ALLOCATED_SIZE, MAX_EDGES_FOUND};
+use libasp::*;
+use log;
+#[cfg(not(feature = "multicore"))]
+use nix::{self, unistd::dup};
+use rangemap::RangeMap;
 
 const ON_CHIP_ADDR: GuestAddr = 0xffff_0000;
 
@@ -93,16 +93,30 @@ extern "C" fn exec_block_hook(id: u64, data: u64) {
         let pc = cpu.read_reg(Regs::Pc).unwrap();
         log::debug!("Flash read fn id was hit");
         if pc as GuestAddr == conf.crashes_mmap_flash_read_fn {
-            let cpy_src: GuestAddr = cpu.read_reg::<libafl_qemu::Regs>(Regs::R0).unwrap() as GuestAddr;
-            let cpy_dest_start: GuestAddr = cpu.read_reg::<libafl_qemu::Regs>(Regs::R1).unwrap() as GuestAddr;
-            let cpy_len: GuestAddr = cpu.read_reg::<libafl_qemu::Regs>(Regs::R2).unwrap() as GuestAddr;
+            let cpy_src: GuestAddr =
+                cpu.read_reg::<libafl_qemu::Regs>(Regs::R0).unwrap() as GuestAddr;
+            let cpy_dest_start: GuestAddr =
+                cpu.read_reg::<libafl_qemu::Regs>(Regs::R1).unwrap() as GuestAddr;
+            let cpy_len: GuestAddr =
+                cpu.read_reg::<libafl_qemu::Regs>(Regs::R2).unwrap() as GuestAddr;
             let cpy_dest_end: GuestAddr = cpy_dest_start + cpy_len;
-            log::debug!("Flash read fn from {:#010x} to {:#010x} for {:#x} bytes", cpy_src, cpy_dest_start, cpy_len);
+            log::debug!(
+                "Flash read fn from {:#010x} to {:#010x} for {:#x} bytes",
+                cpy_src,
+                cpy_dest_start,
+                cpy_len
+            );
             for area in &conf.crashes_mmap_no_write_flash_fn {
-                if (area.0 >= cpy_dest_start && area.0 < cpy_dest_end) ||
-                    (area.1 >= cpy_dest_start && area.1 < cpy_dest_end) {
-                    log::debug!("Flash read fn writes to [{:#010x}, {:#010x}]", area.0, area.1);
-                    let cpy_lr: GuestAddr = cpu.read_reg::<libafl_qemu::Regs>(Regs::Lr).unwrap() as GuestAddr;
+                if (area.0 >= cpy_dest_start && area.0 < cpy_dest_end)
+                    || (area.1 >= cpy_dest_start && area.1 < cpy_dest_end)
+                {
+                    log::debug!(
+                        "Flash read fn writes to [{:#010x}, {:#010x}]",
+                        area.0,
+                        area.1
+                    );
+                    let cpy_lr: GuestAddr =
+                        cpu.read_reg::<libafl_qemu::Regs>(Regs::Lr).unwrap() as GuestAddr;
                     log::debug!("Flash read fn called from {:#010x}", cpy_lr);
                     if !area.2.contains(&cpy_lr) {
                         log::info!("Flash read fn hook triggered!");
@@ -174,11 +188,7 @@ extern "C" fn exec_writes_hook_n(id: u64, addr: GuestAddr, size: usize, data: u6
 }
 
 extern "C" {
-    fn aspfuzz_write_smn_flash(
-        addr: GuestAddr,
-        len: i32,
-        buf: *mut u8,
-    );
+    fn aspfuzz_write_smn_flash(addr: GuestAddr, len: i32, buf: *mut u8);
 }
 pub unsafe fn write_flash_mem(addr: GuestAddr, buf: &[u8]) {
     aspfuzz_write_smn_flash(addr, buf.len() as i32, buf.as_ptr() as *mut u8);
@@ -202,8 +212,8 @@ fn print_input(input: &[u8]) {
                     if i == 0 {
                         last_no_print = true;
                     }
-                    break
-                },
+                    break;
+                }
             }
         }
         if last_no_print {
@@ -234,7 +244,9 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
     // Create directory for this run
     let date = Local::now();
     let run_dir = if unsafe { RUN_DIR_NAME.as_ref().is_some() } {
-        PathBuf::from(format!("runs/{}", unsafe { RUN_DIR_NAME.as_ref().unwrap() }))
+        PathBuf::from(format!("runs/{}", unsafe {
+            RUN_DIR_NAME.as_ref().unwrap()
+        }))
     } else {
         PathBuf::from(format!("runs/{}", date.format("%Y-%m-%d_%H:%M")))
     };
@@ -256,7 +268,7 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
     let mut config_path = run_dir.clone();
     config_path.push("config.yaml");
     if !env::var("AFL_LAUNCHER_CLIENT".to_string()).is_ok() {
-        fs::copy(&conf.config_file,&config_path).unwrap();
+        fs::copy(&conf.config_file, &config_path).unwrap();
     }
 
     // Generate initial inputs
@@ -327,10 +339,14 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
 
         // Reset emulator state
         if unsafe { CRASH_SNAPSHOT } {
-            unsafe { CRASH_SNAPSHOT = false; }
+            unsafe {
+                CRASH_SNAPSHOT = false;
+            }
             rs.load(&qemu, &conf.snapshot_on_crash);
         } else if unsafe { COUNTER_SNAPSHOT >= conf.snapshot_period } {
-            unsafe { COUNTER_SNAPSHOT = 0; }
+            unsafe {
+                COUNTER_SNAPSHOT = 0;
+            }
             rs.load(&qemu, &conf.snapshot_periodically);
         } else {
             rs.load(&qemu, &conf.snapshot_default);
@@ -350,14 +366,18 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
         let mut buffer = buffer.as_slice();
         let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
         for mem in conf.input_mem.iter() {
-            unsafe { write_flash_mem(mem.0, &buffer[..mem.1]); }
+            unsafe {
+                write_flash_mem(mem.0, &buffer[..mem.1]);
+            }
             buffer = &buffer[mem.1..];
         }
 
         // Fixed values to memory
         for fixed in conf.input_fixed.iter() {
             let buffer = unsafe { std::mem::transmute::<u32, [u8; 4]>(fixed.1) };
-            unsafe { write_flash_mem(fixed.0, &buffer); }
+            unsafe {
+                write_flash_mem(fixed.0, &buffer);
+            }
         }
 
         // Start the emulation
@@ -369,12 +389,15 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
         pc = cpu.read_reg(Regs::Pc).unwrap();
         let r0 = cpu.read_reg(Regs::R0).unwrap();
         log::debug!("End at {:#x} with R0={:#x}", pc, r0);
-        unsafe { COUNTER_SNAPSHOT += 1; }
+        unsafe {
+            COUNTER_SNAPSHOT += 1;
+        }
         // Look for crashes if no sink was hit
         if !conf.harness_sinks.iter().any(|&v| v == pc as GuestAddr) {
             // Don't trigger on exceptions
-            if !(ON_CHIP_ADDR..(ON_CHIP_ADDR+4*ExceptionType::UNKNOWN as u32))
-                .contains(&(pc as u32)) {
+            if !(ON_CHIP_ADDR..(ON_CHIP_ADDR + 4 * ExceptionType::UNKNOWN as u32))
+                .contains(&(pc as u32))
+            {
                 unsafe {
                     COUNTER_SNAPSHOT = 0;
                     CRASH_SNAPSHOT = true;
@@ -404,12 +427,16 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
 
         #[allow(unused_assignments, unused_mut)]
         let mut objective_coverage_feedback =
-                MaxMapFeedback::with_name("objective_coverage_feedback", &edges_observer);
+            MaxMapFeedback::with_name("objective_coverage_feedback", &edges_observer);
 
         #[cfg(feature = "debug")]
         {
-            objective_coverage_feedback =
-                MaxMapFeedback::with_names_tracking("objective_coverage_feedback", "edges", true, false);
+            objective_coverage_feedback = MaxMapFeedback::with_names_tracking(
+                "objective_coverage_feedback",
+                "edges",
+                true,
+                false,
+            );
         }
 
         // A feedback to choose if an input is a solution or not
@@ -418,7 +445,7 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
                 feedback_or!(CrashFeedback::new(), ExceptionFeedback::new()),
                 objective_coverage_feedback
             ),
-            CustomMetadataFeedback::new( unsafe { QEMU } ) // always true, used to write metadata output whenever a test-case is a solution
+            CustomMetadataFeedback::new(unsafe { QEMU }) // always true, used to write metadata output whenever a test-case is a solution
         );
 
         // create a State from scratch
@@ -460,7 +487,9 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
         );
 
         // Configure QEMU hook helper
-        let mut hooks = QemuHooks::get().unwrap().new(tuple_list!(
+        let mut hooks = QemuHooks::get()
+            .unwrap()
+            .new(tuple_list!(
                 StdEdgeCoverageModuleBuilder::default(),
                 DrCovModule::new(
                     StdAddressFilter::default(),
@@ -468,7 +497,8 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
                     Some(rangemap),
                     false,
                 )
-        )).unwrap();
+            ))
+            .unwrap();
 
         // Block hooks and write hooks for crash detection
         hooks.blocks_raw(Some(gen_block_hook), Some(exec_block_hook));
@@ -480,7 +510,7 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
                 Some(exec_writes_hook),
                 Some(exec_writes_hook),
                 Some(exec_writes_hook),
-                Some(exec_writes_hook_n)
+                Some(exec_writes_hook_n),
             );
         } else {
             log::debug!("No write generation hooks");
@@ -488,15 +518,15 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
 
         let timeout = Duration::new(5, 0); // 5sec
         let mut executor = QemuExecutor::new(
-                &mut hooks,
-                &mut harness,
-                tuple_list!(edges_observer),
-                &mut fuzzer,
-                &mut state,
-                &mut mgr,
-                timeout,
-            )
-            .unwrap();
+            &mut hooks,
+            &mut harness,
+            tuple_list!(edges_observer),
+            &mut fuzzer,
+            &mut state,
+            &mut mgr,
+            timeout,
+        )
+        .unwrap();
 
         state
             .load_initial_inputs_forced(&mut fuzzer, &mut executor, &mut mgr, &[input_dir.clone()])
@@ -584,17 +614,17 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)] // Read from Cargo.toml
 struct Args {
-   /// YAML config file path
-   #[arg(short, long)]
-   yaml_path: String,
+    /// YAML config file path
+    #[arg(short, long)]
+    yaml_path: String,
 
-   /// Run directory name
-   #[arg(short, long)]
-   run_dir_name: Option<String>,
+    /// Run directory name
+    #[arg(short, long)]
+    run_dir_name: Option<String>,
 
-   /// Number of cores
-   #[arg(short, long)]
-   num_cores: Option<u32>,
+    /// Number of cores
+    #[arg(short, long)]
+    num_cores: Option<u32>,
 }
 
 fn parse_args() -> Vec<String> {
@@ -613,7 +643,9 @@ fn parse_args() -> Vec<String> {
     // For multicore fuzzing a core number must be provided
     #[cfg(feature = "multicore")]
     if cli_args.num_cores.is_some() {
-        unsafe { NUM_CORES = Some(cli_args.num_cores.unwrap()); }
+        unsafe {
+            NUM_CORES = Some(cli_args.num_cores.unwrap());
+        }
     } else {
         println!("For multicore fuzzing a core number must be provided (`cargo make run_fast -h`)");
         exit(3);
@@ -621,7 +653,10 @@ fn parse_args() -> Vec<String> {
 
     //Check if pathes exist
     if !Path::new(&conf.qemu_on_chip_bl_path).exists() {
-        println!("On-chip-bl file path does not exist: {}", &conf.qemu_on_chip_bl_path);
+        println!(
+            "On-chip-bl file path does not exist: {}",
+            &conf.qemu_on_chip_bl_path
+        );
         exit(4);
     }
     if !Path::new(&conf.flash_base).exists() {
@@ -631,17 +666,19 @@ fn parse_args() -> Vec<String> {
 
     // Handle Zen generation
     if !vec![
-            String::from("Zen1"),
-            String::from("Zen+"),
-            String::from("Zen2"),
-            String::from("Zen3"),
-            String::from("Zen4"),
-            String::from("ZenTesla"),
-        ].contains(&conf.qemu_zen){
+        String::from("Zen1"),
+        String::from("Zen+"),
+        String::from("Zen2"),
+        String::from("Zen3"),
+        String::from("Zen4"),
+        String::from("ZenTesla"),
+    ]
+    .contains(&conf.qemu_zen)
+    {
         println!("{} not a valid Zen generation.", &conf.qemu_zen);
         std::process::exit(6);
     }
-    let zen_generation : &str;
+    let zen_generation: &str;
     if conf.qemu_zen == String::from("Zen1") {
         zen_generation = "amd-psp-zen";
     } else if conf.qemu_zen == String::from("Zen+") {
@@ -659,29 +696,39 @@ fn parse_args() -> Vec<String> {
 
     // Use run directory if provided
     if cli_args.run_dir_name.is_some() {
-        unsafe { RUN_DIR_NAME = Some(cli_args.run_dir_name.unwrap()); }
+        unsafe {
+            RUN_DIR_NAME = Some(cli_args.run_dir_name.unwrap());
+        }
     }
 
     // Create arguments to start QEMU with
     let mut qemu_args: Vec<String> = vec![env::args().nth(0).unwrap()];
     #[cfg(feature = "multicore")]
     qemu_args.append(&mut vec![
-                "-trace".to_string(),
-                "file=/dev/null".to_string()
+        "-trace".to_string(),
+        "file=/dev/null".to_string(),
     ]);
     #[cfg(feature = "debug")]
     qemu_args.append(&mut vec![
-                "-d".to_string(),
-                "trace:ccp_*,trace:psp_*".to_string()
+        "-d".to_string(),
+        "trace:ccp_*,trace:psp_*".to_string(),
     ]);
     qemu_args.extend(vec![
         "--machine".to_string(),
         zen_generation.to_string(),
         "--nographic".to_string(),
         "-device".to_string(),
-        format!["loader,file={}/{},addr=0xffff0000,force-raw=on", env::var("PROJECT_DIR").unwrap(), &conf.qemu_on_chip_bl_path],
+        format![
+            "loader,file={}/{},addr=0xffff0000,force-raw=on",
+            env::var("PROJECT_DIR").unwrap(),
+            &conf.qemu_on_chip_bl_path
+        ],
         "-global".to_string(),
-        format!["driver=amd_psp.smnflash,property=flash_img,value={}/{}", env::var("PROJECT_DIR").unwrap(), &conf.flash_base],
+        format![
+            "driver=amd_psp.smnflash,property=flash_img,value={}/{}",
+            env::var("PROJECT_DIR").unwrap(),
+            &conf.flash_base
+        ],
         "-bios".to_string(),
         format!["{}/{}", env::var("PROJECT_DIR").unwrap(), &conf.flash_base],
     ]);
