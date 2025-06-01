@@ -26,6 +26,7 @@ use libafl_bolts::{
     AsSlice,
 };
 use libafl_qemu::{
+    config::QemuConfig,
     modules::{
         edges::StdEdgeCoverageModuleBuilder, utils::filters::StdAddressFilter, DrCovModule,
         EmulatorModuleTuple,
@@ -33,7 +34,9 @@ use libafl_qemu::{
     qemu::Qemu,
     *,
 };
-use libafl_targets::{edges_map_mut_ptr, EDGES_MAP_ALLOCATED_SIZE, MAX_EDGES_FOUND};
+use libafl_targets::{
+    edges_map_mut_ptr, EDGES_MAP_ALLOCATED_SIZE, EDGES_MAP_DEFAULT_SIZE, MAX_EDGES_FOUND,
+};
 use libasp::*;
 use log;
 #[cfg(not(feature = "multicore"))]
@@ -290,8 +293,8 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
     {
         let file_null = File::open("/dev/null").unwrap();
         let null_fd = file_null.as_raw_fd();
-        dup2(null_fd, io::stdout().as_raw_fd()).unwrap();
-        dup2(null_fd, io::stderr().as_raw_fd()).unwrap();
+        unsafe { dup2(null_fd, io::stdout().as_raw_fd()) }.unwrap();
+        unsafe { dup2(null_fd, io::stderr().as_raw_fd()) }.unwrap();
     }
     #[cfg(feature = "debug")]
     {
@@ -299,8 +302,8 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
         log_run_path.push("run.log");
         let runfile = File::create(log_run_path).unwrap();
         let run_fd = runfile.as_raw_fd();
-        dup2(run_fd, io::stdout().as_raw_fd()).unwrap();
-        dup2(run_fd, io::stderr().as_raw_fd()).unwrap();
+        unsafe { dup2(run_fd, io::stdout().as_raw_fd()) }.unwrap();
+        unsafe { dup2(run_fd, io::stderr().as_raw_fd()) }.unwrap();
     }
 
     // Configure ResetState and ExceptionHandler helpers
@@ -314,7 +317,7 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
 
     // Go to FUZZ_START
     qemu.set_breakpoint(conf.harness_start);
-    qemu.run();
+    unsafe { qemu.run() }.unwrap();
     qemu.remove_breakpoint(conf.harness_start);
     let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
     let pc = cpu.read_reg(Regs::Pc).unwrap();
@@ -334,93 +337,104 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
     }
 
     // The closure that we want to fuzz
-    let mut harness = |input: &BytesInput| {
-        log::debug!("### Start harness");
+    let mut harness =
+        |emulator: &mut Emulator<_, _, _, _, _, _, _>, _state: &mut _, input: &BytesInput| {
+            log::debug!("### Start harness");
 
-        // Reset emulator state
-        if unsafe { CRASH_SNAPSHOT } {
-            unsafe {
-                CRASH_SNAPSHOT = false;
-            }
-            rs.load(&qemu, &conf.snapshot_on_crash);
-        } else if unsafe { COUNTER_SNAPSHOT >= conf.snapshot_period } {
-            unsafe {
-                COUNTER_SNAPSHOT = 0;
-            }
-            rs.load(&qemu, &conf.snapshot_periodically);
-        } else {
-            rs.load(&qemu, &conf.snapshot_default);
-        }
-
-        #[cfg(feature = "debug")]
-        print_input(input.bytes());
-
-        // Input to memory
-        let target = input.target_bytes();
-        let mut target_buf = target.as_slice();
-        if target_buf.len() > conf.input_total_size {
-            target_buf = &target_buf[..conf.input_total_size];
-        }
-        let mut buffer = vec![0; conf.input_total_size];
-        buffer[..target_buf.len()].copy_from_slice(target_buf);
-        let mut buffer = buffer.as_slice();
-        let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
-        for mem in conf.input_mem.iter() {
-            unsafe {
-                write_flash_mem(mem.0, &buffer[..mem.1]);
-            }
-            buffer = &buffer[mem.1..];
-        }
-
-        // Fixed values to memory
-        for fixed in conf.input_fixed.iter() {
-            let buffer = unsafe { std::mem::transmute::<u32, [u8; 4]>(fixed.1) };
-            unsafe {
-                write_flash_mem(fixed.0, &buffer);
-            }
-        }
-
-        // Start the emulation
-        let mut pc = cpu.read_reg(Regs::Pc).unwrap();
-        log::debug!("Start at {:#x}", pc);
-        qemu.run();
-
-        // After the emulator finished
-        pc = cpu.read_reg(Regs::Pc).unwrap();
-        let r0 = cpu.read_reg(Regs::R0).unwrap();
-        log::debug!("End at {:#x} with R0={:#x}", pc, r0);
-        unsafe {
-            COUNTER_SNAPSHOT += 1;
-        }
-        // Look for crashes if no sink was hit
-        if !conf.harness_sinks.iter().any(|&v| v == pc as GuestAddr) {
-            // Don't trigger on exceptions
-            if !(ON_CHIP_ADDR..(ON_CHIP_ADDR + 4 * ExceptionType::UNKNOWN as u32))
-                .contains(&(pc as u32))
-            {
+            // Reset emulator state
+            if unsafe { CRASH_SNAPSHOT } {
+                unsafe {
+                    CRASH_SNAPSHOT = false;
+                }
+                rs.load(&qemu, &conf.snapshot_on_crash);
+            } else if unsafe { COUNTER_SNAPSHOT >= conf.snapshot_period } {
                 unsafe {
                     COUNTER_SNAPSHOT = 0;
-                    CRASH_SNAPSHOT = true;
                 }
-                log::info!("Found crash at {:#x}", pc);
-                return ExitKind::Crash;
+                rs.load(&qemu, &conf.snapshot_periodically);
+            } else {
+                rs.load(&qemu, &conf.snapshot_default);
             }
-        }
-        log::debug!("End harness");
-        ExitKind::Ok
-    };
+
+            #[cfg(feature = "debug")]
+            print_input(input.bytes());
+
+            // Input to memory
+            let target = input.target_bytes();
+            let mut target_buf = target.as_slice();
+            if target_buf.len() > conf.input_total_size {
+                target_buf = &target_buf[..conf.input_total_size];
+            }
+            let mut buffer = vec![0; conf.input_total_size];
+            buffer[..target_buf.len()].copy_from_slice(target_buf);
+            let mut buffer = buffer.as_slice();
+            let cpu = qemu.current_cpu().unwrap(); // ctx switch safe
+            for mem in conf.input_mem.iter() {
+                unsafe {
+                    write_flash_mem(mem.0, &buffer[..mem.1]);
+                }
+                buffer = &buffer[mem.1..];
+            }
+
+            // Fixed values to memory
+            for fixed in conf.input_fixed.iter() {
+                let buffer = unsafe { std::mem::transmute::<u32, [u8; 4]>(fixed.1) };
+                unsafe {
+                    write_flash_mem(fixed.0, &buffer);
+                }
+            }
+
+            // Start the emulation
+            let mut pc = cpu.read_reg(Regs::Pc).unwrap();
+            log::debug!("Start at {:#x}", pc);
+            unsafe { qemu.run() }.unwrap();
+
+            // After the emulator finished
+            pc = cpu.read_reg(Regs::Pc).unwrap();
+            let r0 = cpu.read_reg(Regs::R0).unwrap();
+            log::debug!("End at {:#x} with R0={:#x}", pc, r0);
+            unsafe {
+                COUNTER_SNAPSHOT += 1;
+            }
+            // Look for crashes if no sink was hit
+            if !conf.harness_sinks.iter().any(|&v| v == pc as GuestAddr) {
+                // Don't trigger on exceptions
+                if !(ON_CHIP_ADDR..(ON_CHIP_ADDR + 4 * ExceptionType::UNKNOWN as u32))
+                    .contains(&(pc as u32))
+                {
+                    unsafe {
+                        COUNTER_SNAPSHOT = 0;
+                        CRASH_SNAPSHOT = true;
+                    }
+                    log::info!("Found crash at {:#x}", pc);
+                    return ExitKind::Crash;
+                }
+            }
+            log::debug!("End harness");
+            ExitKind::Ok
+        };
 
     #[allow(unused_mut)]
-    let mut run_client = |state: Option<_>, mut mgr, _core_id| -> Result<(), Error> {
+    let mut run_client = |state: Option<_>, mut mgr, _client_description| -> Result<(), Error> {
         // Create an observation channel using the coverage map
         let mut edges_observer = unsafe {
             HitcountsMapObserver::new(VariableMapObserver::from_mut_slice(
                 "edges",
-                OwnedMutSlice::from_raw_parts_mut(edges_map_mut_ptr(), EDGES_MAP_ALLOCATED_SIZE),
+                OwnedMutSlice::from_raw_parts_mut(edges_map_mut_ptr(), EDGES_MAP_DEFAULT_SIZE),
                 &raw mut MAX_EDGES_FOUND,
             ))
             .track_indices()
         };
+
+        let emulator_modules = tuple_list!(StdEdgeCoverageModuleBuilder::default()
+            .map_observer(edges_observer.as_mut())
+            .build()
+            .unwrap());
+
+        let emulator = Emulator::empty()
+            .qemu_parameters(vec![String::from("")])
+            .modules(emulator_modules)
+            .build()?;
 
         // Feedback to rate the interestingness of an input
         let mut feedback = MaxMapFeedback::new(&edges_observer);
@@ -518,8 +532,20 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
         let mut hooks = QemuHooks::get().unwrap();
 
         let timeout = Duration::new(5, 0); // 5sec
+
+        // let mut executor = QemuExecutor::new(
+        //     &mut hooks,
+        //     &mut harness,
+        //     tuple_list!(edges_observer),
+        //     &mut fuzzer,
+        //     &mut state,
+        //     &mut mgr,
+        //     timeout,
+        // )
+        // .unwrap();
+
         let mut executor = QemuExecutor::new(
-            &mut hooks,
+            emulator,
             &mut harness,
             tuple_list!(edges_observer),
             &mut fuzzer,
