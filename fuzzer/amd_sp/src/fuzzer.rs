@@ -26,16 +26,15 @@ use libafl_bolts::{
     AsSlice,
 };
 use libafl_qemu::{
-    config::QemuConfig,
     modules::{
-        edges::StdEdgeCoverageModuleBuilder, utils::filters::StdAddressFilter, DrCovModule,
+        edges::StdEdgeCoverageModuleBuilder,
         EmulatorModuleTuple,
     },
     qemu::Qemu,
     *,
 };
 use libafl_targets::{
-    edges_map_mut_ptr, EDGES_MAP_ALLOCATED_SIZE, EDGES_MAP_DEFAULT_SIZE, MAX_EDGES_FOUND,
+    edges_map_mut_ptr, EDGES_MAP_DEFAULT_SIZE, MAX_EDGES_FOUND,
 };
 use libasp::*;
 use log;
@@ -241,7 +240,7 @@ fn print_input(input: &[u8]) {
     log::info!("{}", out_str);
 }
 
-extern "C" fn on_vcpu(mut qemu: Qemu) {
+extern "C" fn on_vcpu(qemu: Qemu) {
     let conf = borrow_global_conf().unwrap();
 
     // Create directory for this run
@@ -378,7 +377,7 @@ extern "C" fn on_vcpu(mut qemu: Qemu) {
 
             // Fixed values to memory
             for fixed in conf.input_fixed.iter() {
-                let buffer = unsafe { std::mem::transmute::<u32, [u8; 4]>(fixed.1) };
+                let buffer = unsafe { u32::to_ne_bytes(fixed.1) };
                 unsafe {
                     write_flash_mem(fixed.0, &buffer);
                 }
