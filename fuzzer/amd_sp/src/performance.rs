@@ -284,7 +284,7 @@ fn parse_args() -> Vec<String> {
             CALL_OFF_CHIP = Some(0xffff_48e4);
         }
     } else if cli_args.zen_generation.as_ref().unwrap() == &String::from("Zen+") {
-        zen_generation = "amd-psp-zen+";
+        zen_generation = "amd-psp-zenp";
         on_chip_bl = "bins/on-chip-bl-Ryzen-Zen+-Desktop";
         uefi_image = "bins/PRIME-X370-PRO-ASUS-3803.ROM";
         unsafe {

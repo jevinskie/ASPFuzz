@@ -431,7 +431,7 @@ extern "C" fn on_vcpu(qemu: Qemu) {
             .unwrap());
 
         let emulator = Emulator::empty()
-            .qemu_parameters(vec![String::from("")])
+            .qemu_parameters(vec!["-machine".to_string(), "help".to_string()])
             .modules(emulator_modules)
             .build()?;
 
@@ -708,7 +708,7 @@ fn parse_args() -> Vec<String> {
     if conf.qemu_zen == String::from("Zen1") {
         zen_generation = "amd-psp-zen";
     } else if conf.qemu_zen == String::from("Zen+") {
-        zen_generation = "amd-psp-zen+";
+        zen_generation = "amd-psp-zenp";
     } else if conf.qemu_zen == String::from("Zen2") {
         zen_generation = "amd-psp-zen2";
     } else if conf.qemu_zen == String::from("Zen3") {
