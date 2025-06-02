@@ -240,7 +240,7 @@ fn print_input(input: &[u8]) {
     log::info!("{}", out_str);
 }
 
-extern "C" fn on_vcpu(qemu: Qemu) {
+fn fuzz_sub(qemu_args: &Vec<String>) {
     let conf = borrow_global_conf().unwrap();
 
     // Create directory for this run
@@ -272,6 +272,10 @@ extern "C" fn on_vcpu(qemu: Qemu) {
     if !env::var("AFL_LAUNCHER_CLIENT".to_string()).is_ok() {
         fs::copy(&conf.config_file, &config_path).unwrap();
     }
+
+    log::warn!("### before Qemu::init");
+    let qemu = Qemu::init(qemu_args).unwrap();
+    log::warn!("### qemu: {qemu:#?}");
 
     // Generate initial inputs
     let input_dir: PathBuf = InitialInput::new().create_initial_inputs(
@@ -335,6 +339,8 @@ extern "C" fn on_vcpu(qemu: Qemu) {
         qemu.set_breakpoint(*bp);
     }
 
+    log::warn!("### Before harness");
+
     // The closure that we want to fuzz
     let mut harness =
         |emulator: &mut Emulator<_, _, _, _, _, _, _>, _state: &mut _, input: &BytesInput| {
@@ -356,7 +362,7 @@ extern "C" fn on_vcpu(qemu: Qemu) {
             }
 
             #[cfg(feature = "debug")]
-            print_input(input.bytes());
+            print_input(input.as_ref());
 
             // Input to memory
             let target = input.target_bytes();
@@ -444,12 +450,13 @@ extern "C" fn on_vcpu(qemu: Qemu) {
 
         #[cfg(feature = "debug")]
         {
-            objective_coverage_feedback = MaxMapFeedback::with_names_tracking(
-                "objective_coverage_feedback",
-                "edges",
-                true,
-                false,
-            );
+            objective_coverage_feedback.track_indices();
+            //objective_coverage_feedback = MaxMapFeedback::with_names_tracking(
+            //    "objective_coverage_feedback",
+            //    "edges",
+            //    true,
+            //    false,
+            //);
         }
 
         // A feedback to choose if an input is a solution or not
@@ -768,16 +775,5 @@ pub fn fuzz() {
 
     // Generate QEMU start arguments
     let qemu_args = parse_args();
-
-    // Setup QEMU
-    let qemu = Qemu::init(&qemu_args).unwrap();
-    unsafe {
-        QEMU = &qemu as *const _ as u64;
-    }
-
-    // Overwrite the QEMU vcpu loop with the fuzzer
-    // qemu.set_vcpu_start(on_vcpu);
-
-    // Start QEMU
-    unsafe { qemu.run() }.unwrap();
+    fuzz_sub(&qemu_args);
 }
