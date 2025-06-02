@@ -68,7 +68,7 @@ pub enum ResetLevel {
     HardReset,
 }
 
-extern "C" {
+unsafe extern "C" {
     static mut aspfuzz_timer_count_0: u64;
     static mut aspfuzz_timer_control_0: u64;
     static mut aspfuzz_timer_count_1: u64;

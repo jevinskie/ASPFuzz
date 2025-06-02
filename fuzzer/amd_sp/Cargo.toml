@@ -2,7 +2,8 @@
 name = "aspfuzz"
 version = "0.8.0"
 authors = ["Patrick Gersch"]
-edition = "2018"
+edition = "2021"
+resolver = "2"
 
 [features]
 default = ["std"]
