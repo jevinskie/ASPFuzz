@@ -1,0 +1,11 @@
+{
+    "rust-analyzer.checkOnSave": false,
+    "rust-analyzer.linkedProjects": [
+        "${workspaceFolder}/fuzzer/amd_sp/Cargo.toml",
+        "${workspaceFolder}/fuzzer/libasp/Cargo.toml",
+        "${workspaceFolder}/LibAFL/libafl_qemu/Cargo.toml",
+        "${workspaceFolder}/LibAFL/libafl_qemu/libafl_qemu_build/Cargo.toml",
+        "${workspaceFolder}/LibAFL/libafl_qemu/libafl_qemu_sys/Cargo.toml",
+        "${workspaceFolder}/LibAFL/fuzzers/full_system/qemu_baremetal/Cargo.toml",
+    ]
+}
