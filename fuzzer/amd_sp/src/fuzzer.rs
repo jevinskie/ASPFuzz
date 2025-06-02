@@ -26,16 +26,11 @@ use libafl_bolts::{
     AsSlice,
 };
 use libafl_qemu::{
-    modules::{
-        edges::StdEdgeCoverageModuleBuilder,
-        EmulatorModuleTuple,
-    },
+    modules::{edges::StdEdgeCoverageModuleBuilder, EmulatorModuleTuple},
     qemu::Qemu,
     *,
 };
-use libafl_targets::{
-    edges_map_mut_ptr, EDGES_MAP_DEFAULT_SIZE, MAX_EDGES_FOUND,
-};
+use libafl_targets::{edges_map_mut_ptr, EDGES_MAP_DEFAULT_SIZE, MAX_EDGES_FOUND};
 use libasp::*;
 use log;
 #[cfg(not(feature = "multicore"))]
@@ -189,11 +184,13 @@ extern "C" fn exec_writes_hook_n(id: u64, addr: GuestAddr, size: usize, data: u6
     }
 }
 
-extern "C" {
+unsafe extern "C" {
     fn aspfuzz_write_smn_flash(addr: GuestAddr, len: i32, buf: *mut u8);
 }
 pub unsafe fn write_flash_mem(addr: GuestAddr, buf: &[u8]) {
-    aspfuzz_write_smn_flash(addr, buf.len() as i32, buf.as_ptr() as *mut u8);
+    unsafe {
+        aspfuzz_write_smn_flash(addr, buf.len() as i32, buf.as_ptr() as *mut u8);
+    }
 }
 
 #[cfg(feature = "debug")]
