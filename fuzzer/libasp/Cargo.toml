@@ -9,7 +9,7 @@ resolver = "2"
 
 [dependencies]
 libafl = { path = "../../LibAFL/libafl/", default-features = false, features = ["prelude", "introspection"] }
-libafl_qemu = { path = "../../LibAFL/libafl_qemu/", features = ["arm", "systemmode"], default-features = false }
+libafl_qemu = { path = "../../LibAFL/libafl_qemu/", features = ["arm", "systemmode", "paranoid_debug"], default-features = false }
 libafl_bolts = { path = "../../LibAFL/libafl_bolts/" }
 serde = { version = "1.0", default-features = false, features = ["alloc"] } # serialization lib
 yaml-rust = "0.4"
